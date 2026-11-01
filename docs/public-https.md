@@ -1,0 +1,9 @@
+# Public HTTPS deployment
+
+Use a stable hostname you control and point its DNS A/AAAA records to this server's correct public addresses. Incorrect AAAA records can break mobile reachability even when IPv4 works. Install a maintained Caddy 2.8+ from its official installation instructions. Do not replace another website's ingress or open an unauthenticated app port.
+
+Run `adcc https ai.example.com`. It validates the hostname, resolves DNS, creates a new private edge password and Caddy configuration, validates that configuration, and writes a narrowly scoped administrator apply script. It does not enable public service or change the firewall. Confirm every resolved address is yours and inspect the generated files before running the exact sudo command it prints. Then restart the application/PTY user units as instructed.
+
+Caddy listens on 80/443, redirects HTTP to HTTPS and obtains/renews a trusted certificate. The application remains loopback-only. Independent Basic Authentication uses username operator and the separately generated password; application login remains required. Existing occupied 80/443 ports cause the generated apply script to stop for review rather than displacing a site. The system proxy runs as the installing UID with only low-port binding capability; the root-installed unit does not run a root shell.
+
+Validate externally: DNS A/AAAA, valid certificate, HTTP redirect, anonymous 401, both logins, unauthorized WebSocket rejection, terminal stream/replay and reconnect, mobile layout, and direct app-port refusal. `adcc https` preparing a plan is not proof that public HTTPS works. No self-signed fallback is offered. Retain SSH until independent tests pass. Public HTTPS on a fresh distribution instance is a manual acceptance requirement, not covered by local browser CI.

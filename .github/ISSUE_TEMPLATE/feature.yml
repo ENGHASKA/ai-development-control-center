@@ -1,0 +1,9 @@
+name: Feature request
+description: Propose a practical improvement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem, desired behavior and tradeoffs
+    validations:
+      required: true

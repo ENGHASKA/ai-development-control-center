@@ -1,0 +1,103 @@
+name: CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  python-security:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare distro sandbox policy on disposable VM
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap apparmor-profiles
+          if [ ! -e /etc/apparmor.d/bwrap-userns-restrict ]; then
+            sudo install -m0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+          fi
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+      - run: python3 -m unittest discover -s tests -v
+      - name: Python static analysis
+        run: |
+          python3 -m venv /tmp/audit
+          /tmp/audit/bin/pip install bandit==1.8.6
+          /tmp/audit/bin/bandit -r libexec bin install.py -lll
+      - name: Full-history secret scan
+        run: |
+          curl -fsSL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz -o /tmp/gitleaks.tar.gz
+          echo '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz' | sha256sum -c
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          /tmp/gitleaks git --redact --no-banner --log-opts=--all
+      - name: Release inventory and integrity
+        run: |
+          python3 scripts/package.py
+          cd dist
+          sha256sum -c SHA256SUMS
+  dashboard:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.22.2
+      - run: npm install --global --ignore-scripts pnpm@11.17.0
+      - run: pnpm install --frozen-lockfile
+        working-directory: dashboard
+      - run: pnpm typecheck && pnpm test --maxWorkers=2 && pnpm build && pnpm audit --prod --audit-level=high
+        working-directory: dashboard
+        env:
+          NODE_OPTIONS: --max-old-space-size=2048
+          NEXT_TELEMETRY_DISABLED: '1'
+  fresh-install:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24.22.2
+      - name: Start disposable runner user manager
+        run: |
+          sudo loginctl enable-linger "$(id -un)"
+          sudo systemctl start "user@$(id -u).service"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+      - name: Prepare distro sandbox policy on disposable VM
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap apparmor-profiles
+          if [ ! -e /etc/apparmor.d/bwrap-userns-restrict ]; then
+            sudo install -m0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+          fi
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+      - name: Fresh installer, unique paths and real services
+        run: python3 install.py --install-system-deps --prefix "$RUNNER_TEMP/adcc-install" --workspace "$RUNNER_TEMP/adcc-workspace" --port 3430
+      - name: Real background lifecycle, upgrade and restore
+        run: python3 scripts/ci-systemd.py
+      - name: Authenticated browser and disconnect checks
+        run: |
+          npm install --prefix /tmp/browser --ignore-scripts playwright@1.58.2
+          /tmp/browser/node_modules/.bin/playwright install --with-deps chromium
+          ADCC_PLAYWRIGHT_MODULE=/tmp/browser/node_modules/playwright node scripts/browser-check.cjs
+      - name: Installer failure diagnostics
+        if: failure()
+        run: |
+          systemctl --user status adcc-dashboard adcc-worker adcc-proxy adcc-terminal --no-pager || true
+          journalctl --user -u adcc-dashboard -u adcc-worker -n 80 --no-pager || true
+      - name: Safe uninstall retains data
+        run: |
+          "$HOME/.local/bin/adcc" uninstall
+          test -f "$RUNNER_TEMP/adcc-workspace/tasks/state.sqlite3"
+          test -f "$HOME/.config/ai-development-control-center/dashboard-password"
+          ! systemctl --user is-active --quiet adcc-dashboard

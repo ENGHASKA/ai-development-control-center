@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+import pathlib,sys,os,json,subprocess
+sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'libexec'))
+from manage import CONFIG,load,config_env,main
+if __name__=='__main__':
+ try:
+  if len(sys.argv)>1 and sys.argv[1]=='task':
+   c=load();os.environ.update(config_env(c));os.execv('/usr/bin/python3',['python3',str(pathlib.Path(__file__).resolve().parent/'acc'),*sys.argv[2:]])
+  else:main()
+ except Exception as e:raise SystemExit(str(e))

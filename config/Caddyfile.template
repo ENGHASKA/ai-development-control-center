@@ -1,0 +1,52 @@
+{
+	admin off
+	servers {
+		protocols h1 h2
+		timeouts {
+			read_header 10s
+			idle 5m
+		}
+	}
+}
+
+(edge_controls) {
+	request_body {
+		max_size 10MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+	@private path /internal /internal/* /debug /debug/* /metrics /api/auth/register /api/auth/signup
+	route {
+		respond @private 404
+		basic_auth {
+			operator @HASH@
+		}
+		reverse_proxy 127.0.0.1:@PORT@ {
+			header_up -Authorization
+			header_up -Proxy-Authorization
+			header_up -Forwarded
+			header_up -Cf-Ray
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-Proto https
+			header_up Cf-Connecting-Ip {remote_host}
+			flush_interval -1
+			stream_close_delay 5m
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 120s
+			}
+		}
+	}
+
+}
+
+@HOST@ {
+	import edge_controls
+}

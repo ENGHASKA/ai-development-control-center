@@ -1,0 +1,12 @@
+node_modules/
+.next*/
+__pycache__/
+*.pyc
+.env*
+*.log
+*.sqlite*
+dist/
+artifacts/
+.playwright/
+
+.claude/
